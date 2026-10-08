@@ -13,7 +13,7 @@ This guide covers:
 * Monitoring connection status and routes
 * Troubleshooting common problems
 
-> **Tested on:** Ubuntu 26.04, SoftEther VPN Client v4.44 build 9807
+> **Tested on:** Ubuntu 26.04, SoftEther VPN Client v4.44 build 9807  
 > **Placeholders:** Replace values such as `<VPN_ACCOUNT>`, `<SERVER_IP>`, `<PORT>`, `<HUB>`, and `<USERNAME>` with the values provided by your VPN administrator.
 
 ---
