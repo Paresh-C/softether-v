@@ -1,0 +1,122 @@
+
+#!/usr/bin/env bash
+# vpn - manage a SoftEther VPN Client connection on Linux
+
+set -Eeuo pipefail
+
+VPN_ACCOUNT="${VPN_ACCOUNT:-}"
+VPN_INTERFACE="${VPN_INTERFACE:-vpn_vpn}"
+VPNCLIENT_DIR="${VPNCLIENT_DIR:-/usr/local/vpnclient}"
+VPN_SUBNET_PREFIX="${VPN_SUBNET_PREFIX:-}"
+DHCLIENT="${DHCLIENT:-dhclient}"
+
+VPNCLIENT="$VPNCLIENT_DIR/vpnclient"
+VPNCMD="$VPNCLIENT_DIR/vpncmd"
+
+usage() {
+  printf 'Usage: vpn {up|down|status}\n'
+}
+
+die() {
+  printf 'Error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 ||
+    die "Required command not found: $1"
+}
+
+require_account() {
+  [[ -n "$VPN_ACCOUNT" ]] ||
+    die "Set VPN_ACCOUNT to your SoftEther connection profile name."
+}
+
+wait_for_iface() {
+  local attempt
+
+  for attempt in {1..15}; do
+    if ip link show "$VPN_INTERFACE" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  die "Interface '$VPN_INTERFACE' did not appear."
+}
+
+has_expected_ip() {
+  local addresses
+
+  addresses="$(ip -4 -o addr show dev "$VPN_INTERFACE" 2>/dev/null || true)"
+
+  if [[ -n "$VPN_SUBNET_PREFIX" ]]; then
+    grep -Fq "inet $VPN_SUBNET_PREFIX" <<<"$addresses"
+  else
+    [[ -n "$addresses" ]]
+  fi
+}
+
+case "${1:-}" in
+  up)
+    require_account
+    require_command sudo
+    require_command ip
+    [[ -x "$VPNCLIENT" ]] || die "VPN client not found: $VPNCLIENT"
+    [[ -x "$VPNCMD" ]] || die "vpncmd not found: $VPNCMD"
+
+    sudo "$VPNCLIENT" start
+    sleep 2
+
+    sudo "$VPNCMD" localhost /CLIENT /CMD \
+      AccountConnect "$VPN_ACCOUNT" >/dev/null
+
+    wait_for_iface
+    sleep 3
+
+    if ! has_expected_ip; then
+      require_command "$DHCLIENT"
+      sudo "$DHCLIENT" -v "$VPN_INTERFACE"
+    fi
+
+    printf 'VPN connection requested successfully.\n'
+    ;;
+
+  down)
+    require_account
+    require_command sudo
+    require_command ip
+    [[ -x "$VPNCMD" ]] || die "vpncmd not found: $VPNCMD"
+
+    if command -v "$DHCLIENT" >/dev/null 2>&1; then
+      sudo "$DHCLIENT" -r "$VPN_INTERFACE" 2>/dev/null || true
+    fi
+
+    sudo "$VPNCMD" localhost /CLIENT /CMD \
+      AccountDisconnect "$VPN_ACCOUNT" >/dev/null
+
+    printf 'VPN disconnect requested successfully.\n'
+    ;;
+
+  status)
+    require_account
+    require_command sudo
+    require_command ip
+    require_command "$VPNCMD"
+
+    sudo "$VPNCMD" localhost /CLIENT /CMD \
+      AccountStatusGet "$VPN_ACCOUNT"
+
+    printf '\nInterface:\n'
+    ip -br addr show "$VPN_INTERFACE" 2>/dev/null ||
+      printf 'Interface not found.\n'
+
+    printf '\nRouting table:\n'
+    ip route
+    ;;
+
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac
